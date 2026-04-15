@@ -90,7 +90,6 @@ using fs::File;
 // TIMING
 // =============================================================================
 #define AUTO_CHANGE_MINUTES  1
-#define TRANSITION_DURATION  1000  // crossfade ms
 
 // =============================================================================
 // STORAGE
@@ -123,6 +122,23 @@ StorageType activeStorage = STORAGE_NONE;
 //unsigned long autoChangeInterval = (unsigned long)AUTO_CHANGE_MINUTES * 60UL * 1000UL;
 unsigned long autoChangeInterval  = (unsigned long)AUTO_CHANGE_MINUTES * 60UL * 100UL;  // fast for testing
 unsigned long lastChangeTime      = 0;
+
+enum TransitionType {
+    TRANS_CROSSFADE = 0,
+    TRANS_WAVE_RIPPLE = 1,
+    TRANS_PIXEL_DISSOLVE = 2,
+    TRANS_GLITCH_NOISE = 3,
+    TRANS_4X4_BLOCKS = 4,
+    TRANS_IRIS_WIPE = 5,
+    TRANS_WATER = 6,
+    TRANS_GENERATIVE = 7,
+    TRANS_SMOKE = 8,
+    TRANS_MAX
+};
+
+TransitionType currentTransitionType = TRANS_CROSSFADE;
+unsigned long currentTransitionDuration = 1000;
+
 unsigned long transitionStartTime = 0;
 bool          isTransitioning     = false;
 
@@ -140,6 +156,43 @@ SPIClass spiSD(VSPI);
 void startTransition();
 bool loadImageToFrame(int index, uint16_t* frame);
 void displayFrame(uint16_t* frame);
+
+// =============================================================================
+// MATH / NOISE HELPERS FOR TRANSITIONS
+// =============================================================================
+
+// Simple and fast pseudo-random hash based on coordinates
+inline float hash21(int x, int y) {
+    uint32_t a = x * 3284157443 + y * 1911520717;
+    a ^= a << 10;
+    a ^= a >> 15;
+    a *= 2048419325;
+    a ^= a << 10;
+    a ^= a >> 15;
+    return (float)a / 4294967295.0f;
+}
+
+// Fast 2D value noise
+float valueNoise(float x, float y) {
+    int ix = (int)floor(x);
+    int iy = (int)floor(y);
+    float fx = x - ix;
+    float fy = y - iy;
+
+    // Smoothstep interpolation
+    float ux = fx * fx * (3.0f - 2.0f * fx);
+    float uy = fy * fy * (3.0f - 2.0f * fy);
+
+    float n00 = hash21(ix, iy);
+    float n10 = hash21(ix + 1, iy);
+    float n01 = hash21(ix, iy + 1);
+    float n11 = hash21(ix + 1, iy + 1);
+
+    float nx0 = n00 * (1.0f - ux) + n10 * ux;
+    float nx1 = n01 * (1.0f - ux) + n11 * ux;
+
+    return nx0 * (1.0f - uy) + nx1 * uy;
+}
 
 // =============================================================================
 // COLOR CONVERSION HELPERS
@@ -193,6 +246,199 @@ File openImageFile(const String& path) {
         return SD.open(path, FILE_READ);
     } else {
         return SPIFFS.open(path, "r");
+    }
+}
+
+// =============================================================================
+// TRANSITION 1: WAVE / RIPPLE
+// =============================================================================
+void renderTransitionWaveRipple(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+    float offsetMagnitude = (1.0f - progress) * 32.0f;
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // Ripple carries Image B over Image A
+            float wave = sinf((float)y * 0.2f + progress * 10.0f) * offsetMagnitude;
+            int srcX = x + (int)wave;
+
+            if (progress > (float)x / PANEL_RES_X) {
+                // Image B sweeping in
+                if (srcX >= 0 && srcX < PANEL_RES_X) {
+                    display->drawPixel(x, y, to[y * PANEL_RES_X + srcX]);
+                } else {
+                    display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+                }
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 2: PIXEL DISSOLVE
+// =============================================================================
+void renderTransitionPixelDissolve(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            float threshold = hash21(x, y);
+            if (progress > threshold) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 3: GLITCH / NOISE
+// =============================================================================
+void renderTransitionGlitchNoise(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        // Horizontal glitch shifting
+        int shift = 0;
+        if (hash21(y, (int)(progress * 20.0f)) > 0.9f) {
+            shift = (int)((hash21(y, 100) - 0.5f) * 10.0f * (1.0f - progress));
+        }
+
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            int srcX = constrain(x + shift, 0, PANEL_RES_X - 1);
+            float noiseMask = hash21(x, y + (int)(progress * 100.0f));
+
+            if (progress > noiseMask) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + srcX]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + srcX]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 4: 4x4 PIXEL BLOCKS
+// =============================================================================
+void renderTransition4x4Blocks(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            int blockX = x / 4;
+            int blockY = y / 4;
+            float threshold = hash21(blockX, blockY);
+
+            if (progress > threshold) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 5: IRIS WIPE (Keep the same shape)
+// =============================================================================
+void renderTransitionIrisWipe(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+
+    float centerX = PANEL_RES_X / 2.0f;
+    float centerY = PANEL_RES_Y / 2.0f;
+    float maxRadius = sqrtf(centerX*centerX + centerY*centerY);
+    float currentRadius = maxRadius * progress;
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            float dx = x - centerX;
+            float dy = y - centerY;
+            float dist = sqrtf(dx*dx + dy*dy);
+
+            if (dist < currentRadius) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 6: WATER TRANSLUCID
+// =============================================================================
+void renderTransitionWater(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // Refraction distortion based on noise
+            float n = valueNoise(x * 0.1f, y * 0.1f + progress * 5.0f);
+            int distortion = (int)((n - 0.5f) * 10.0f * sinf(progress * 3.14159f));
+
+            int srcX = constrain(x + distortion, 0, PANEL_RES_X - 1);
+            int srcY = constrain(y + distortion, 0, PANEL_RES_Y - 1);
+
+            if (progress > n) {
+                display->drawPixel(x, y, to[srcY * PANEL_RES_X + srcX]);
+            } else {
+                display->drawPixel(x, y, from[srcY * PANEL_RES_X + srcX]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 7: GENERATIVE ART
+// =============================================================================
+void renderTransitionGenerative(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // Procedural geometric pattern
+            float val = sinf(x * 0.2f) * cosf(y * 0.2f) * 0.5f + 0.5f;
+            float mask = fmodf(val + progress, 1.0f);
+
+            if (progress > 0.9f || mask < progress) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 8: TOXIC SMOKE FOG
+// =============================================================================
+void renderTransitionSmoke(uint16_t* from, uint16_t* to, float progress) {
+    progress = constrain(progress, 0.0f, 1.0f);
+
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // Thick fog noise mask
+            float n1 = valueNoise(x * 0.05f, y * 0.05f - progress * 2.0f);
+            float n2 = valueNoise(x * 0.1f + 10.0f, y * 0.1f + progress * 3.0f);
+            float smokeMask = (n1 + n2) * 0.5f;
+
+            if (progress + smokeMask * 0.5f > 0.8f) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else {
+                // Tint to a toxic green slightly if in transition zone
+                if (progress > 0.1f && progress + smokeMask > 0.5f) {
+                    uint8_t r, g, b;
+                    rgb565_to_888(from[y * PANEL_RES_X + x], r, g, b);
+                    g = min(255, g + (int)(smokeMask * 100));
+                    display->drawPixel(x, y, display->color565(r, g, b));
+                } else {
+                    display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+                }
+            }
+        }
     }
 }
 
@@ -328,7 +574,7 @@ void displayFrame(uint16_t* frame) {
 // CROSSFADE BETWEEN TWO FRAMES
 // progress: 0.0 = full 'from', 1.0 = full 'to'
 // =============================================================================
-void crossFadeFrames(uint16_t* from, uint16_t* to, float progress) {
+void renderTransitionCrossfade(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
     float q  = 1.0f - progress;
     uint8_t r1, g1, b1, r2, g2, b2;
@@ -388,16 +634,47 @@ void startTransition() {
 
     isTransitioning     = true;
     transitionStartTime = millis();
-    Serial.printf("Fade: %d -> %d\n", currentImageIndex, nextImageIndex);
+
+    // Randomize next transition
+    currentTransitionType = (TransitionType)random(0, TRANS_MAX);
+
+    // Assign specific duration per transition
+    switch (currentTransitionType) {
+        case TRANS_CROSSFADE:      currentTransitionDuration = 1000; break;
+        case TRANS_WAVE_RIPPLE:    currentTransitionDuration = 2000; break;
+        case TRANS_PIXEL_DISSOLVE: currentTransitionDuration = 1500; break;
+        case TRANS_GLITCH_NOISE:   currentTransitionDuration = 1200; break;
+        case TRANS_4X4_BLOCKS:     currentTransitionDuration = 1500; break;
+        case TRANS_IRIS_WIPE:      currentTransitionDuration = 1200; break;
+        case TRANS_WATER:          currentTransitionDuration = 2500; break;
+        case TRANS_GENERATIVE:     currentTransitionDuration = 2500; break;
+        case TRANS_SMOKE:          currentTransitionDuration = 3000; break;
+        default:                   currentTransitionDuration = 1000; break;
+    }
+
+    Serial.printf("Transition: %d (dur: %lu) - Image: %d -> %d\n",
+                  currentTransitionType, currentTransitionDuration,
+                  currentImageIndex, nextImageIndex);
 }
 
+// Forward declare the transition functions
+void renderTransitionCrossfade(uint16_t* from, uint16_t* to, float progress);
+void renderTransitionWaveRipple(uint16_t* from, uint16_t* to, float progress);
+void renderTransitionPixelDissolve(uint16_t* from, uint16_t* to, float progress);
+void renderTransitionGlitchNoise(uint16_t* from, uint16_t* to, float progress);
+void renderTransition4x4Blocks(uint16_t* from, uint16_t* to, float progress);
+void renderTransitionIrisWipe(uint16_t* from, uint16_t* to, float progress);
+void renderTransitionWater(uint16_t* from, uint16_t* to, float progress);
+void renderTransitionGenerative(uint16_t* from, uint16_t* to, float progress);
+void renderTransitionSmoke(uint16_t* from, uint16_t* to, float progress);
+
 // =============================================================================
-// UPDATE CROSSFADE (called every loop)
+// UPDATE TRANSITION (called every loop)
 // =============================================================================
 void updateTransition() {
     if (!isTransitioning) return;
 
-    float progress = (float)(millis() - transitionStartTime) / (float)TRANSITION_DURATION;
+    float progress = (float)(millis() - transitionStartTime) / (float)currentTransitionDuration;
 
     if (progress >= 1.0f) {
         // Fade complete - swap buffers
@@ -410,9 +687,20 @@ void updateTransition() {
         nextFrame     = tmp;
 
         displayFrame(currentFrame);
-        Serial.printf("Fade done -> image %d\n", currentImageIndex);
+        Serial.printf("Transition done -> image %d\n", currentImageIndex);
     } else {
-        crossFadeFrames(currentFrame, nextFrame, progress);
+        switch (currentTransitionType) {
+            case TRANS_CROSSFADE:      renderTransitionCrossfade(currentFrame, nextFrame, progress); break;
+            case TRANS_WAVE_RIPPLE:    renderTransitionWaveRipple(currentFrame, nextFrame, progress); break;
+            case TRANS_PIXEL_DISSOLVE: renderTransitionPixelDissolve(currentFrame, nextFrame, progress); break;
+            case TRANS_GLITCH_NOISE:   renderTransitionGlitchNoise(currentFrame, nextFrame, progress); break;
+            case TRANS_4X4_BLOCKS:     renderTransition4x4Blocks(currentFrame, nextFrame, progress); break;
+            case TRANS_IRIS_WIPE:      renderTransitionIrisWipe(currentFrame, nextFrame, progress); break;
+            case TRANS_WATER:          renderTransitionWater(currentFrame, nextFrame, progress); break;
+            case TRANS_GENERATIVE:     renderTransitionGenerative(currentFrame, nextFrame, progress); break;
+            case TRANS_SMOKE:          renderTransitionSmoke(currentFrame, nextFrame, progress); break;
+            default:                   renderTransitionCrossfade(currentFrame, nextFrame, progress); break;
+        }
     }
 }
 
