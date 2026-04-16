@@ -6,7 +6,30 @@
 
 A high-performance slideshow player for 64x64 RGB LED matrices (FM6126A) with **30+ stunning transition effects** including particles, atomic blast, morphing, oil painting, and more. Supports SD card (primary) and SPIFFS (fallback) storage with multiple image formats.
 
-![Demo](https://via.placeholder.com/800x400?text=HUB75+Slideshow+Demo)
+ <img width="4080" height="1840" alt="1776346488757" src="https://github.com/user-attachments/assets/58b3d72e-eadd-4f78-8b80-262d31b0763a" />
+<img width="1840" height="4080" alt="1776346488693" src="https://github.com/user-attachments/assets/222e643b-faf5-4a4b-bfd5-ba4012631ce1" />
+<img width="4080" height="1840" alt="1776346488782" src="https://github.com/user-attachments/assets/7c0200b1-5efa-4f37-82f3-a1377b322a8a" />
+
+
+
+
+
+https://github.com/user-attachments/assets/461cb867-911e-473c-b0f7-770bdc52268f
+
+
+
+https://github.com/user-attachments/assets/381d6bd6-79db-47c6-8fbe-0930825989d9
+
+
+
+https://github.com/user-attachments/assets/e7c9754c-0b2d-43ac-9d90-497c119752b9
+
+
+
+https://github.com/user-attachments/assets/a1690b78-bdeb-4f24-a56a-9f60cd9922e0
+
+
+
 
 ## ✨ Features
 
