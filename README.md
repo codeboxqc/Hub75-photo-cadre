@@ -1,5 +1,10 @@
 # HUB75 LED Matrix Slideshow v3
 
+Arduino
+ESP32
+HUB75
+Micro SD Card Mini TF Card Reader Module SPI interfaces with level converter chip 5V/3.3V For Arduino
+
 [![PlatformIO](https://img.shields.io/badge/PlatformIO-ESP32-orange)](https://platformio.org/)
 [![ESP32](https://img.shields.io/badge/ESP32-HUB75-blue)](https://www.espressif.com/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
