@@ -149,4 +149,240 @@ Lower panel brightness
 Use 16-bit or 8-bit images for faster loading
 
 
+Technical/Professional
+Title	Description
+ESP32-HUB75 Media Player	Professional, marketable
+PixelPulse Matrix Controller	Modern, energetic
+LED Canvas Pro	Artistic, premium
+Matrix Stream Engine	Technical, powerful
+ChromaFlow HUB75	Color-focused, elegant
+Artistic/Creative
+Title	Description
+Pixel Morph	Emphasizes transitions
+Luminous Flow	Poetic, visual
+Chroma Cascade	Color transition focus
+Vivid Shift	Dynamic, bright
+Neon Narrator	Retro, storytelling
+Open Source/Hacker
+Title	Description
+OpenPixel Player	Community-focused
+Matrix Libre	Freedom-focused
+PixelFleet	Scalable, network-ready
+HUB75 Hero	Playful, memorable
+ESPixel Engine	Technical, clear
+🏷️ Serial/Console Title
+
+
+
+HUB75 LED Matrix Guide
+Understanding HUB75 Pinout
+The HUB75 connector on your LED matrix has 16 pins. Here's the complete mapping:
+
+HUB75 Pin	Signal	Description	ESP32 GPIO
+1	R1	Red data (top half)	GPIO 25
+2	G1	Green data (top half)	GPIO 26
+3	B1	Blue data (top half)	GPIO 27
+4	GND	Ground	GND
+5	R2	Red data (bottom half)	GPIO 14
+6	G2	Green data (bottom half)	GPIO 12
+7	B2	Blue data (bottom half)	GPIO 13
+8	GND	Ground	GND
+9	A	Row address bit 0	GPIO 23
+10	B	Row address bit 1	GPIO 19
+11	C	Row address bit 2	GPIO 5
+12	D	Row address bit 3	GPIO 17
+13	E	Row address bit 4	GPIO 18
+14	LAT	Latch signal	GPIO 4
+15	CLK	Clock signal	GPIO 16
+16	OE	Output Enable	GPIO 15
+Important: The E pin (row address bit 4) is required for 64x64 panels (1/32 scan). For 32x32 or 64x32 panels (1/16 scan), the E pin can be omitted.
+
+Supported Driver Chips
+Your panel may have one of these driver chips. The code supports:
+
+FM6126A (most common for 64x64) — used in this project
+
+FM6124
+
+ICN2038S
+
+MBI5124 (requires clock_phase: true)
+
+DP3246
+
+Generic standard shift register
+
+Panel Specifications
+Panel Type	Resolution	Scan Rate	E Pin Required	Power Draw (approx)
+64x32	2048 pixels	1/16 scan	No	2-3A
+64x64	4096 pixels	1/32 scan	Yes	4-6A
+128x64	8192 pixels	1/32 scan	Yes	8-12A
+Panel Identification Tips
+To identify your panel type:
+
+Check the model number on the back of the PCB
+
+Look for the driver chip markings (FM6126A, ICN2038S, etc.)
+
+Count the rows of ICs — more ICs = higher resolution panels
+
+Check the connector — 16-pin HUB75 is standard
+
+Wiring Instructions
+Complete Wiring Diagram
+
+
+ESP32 Dev Board                        HUB75 Matrix (64x64)
+┌─────────────────┐                    ┌─────────────────┐
+│                 │                    │                 │
+│  GPIO25 ────────┼────────────────────┼──── R1          │
+│  GPIO26 ────────┼────────────────────┼──── G1          │
+│  GPIO27 ────────┼────────────────────┼──── B1          │
+│  GPIO14 ────────┼────────────────────┼──── R2          │
+│  GPIO12 ────────┼────────────────────┼──── G2          │
+│  GPIO13 ────────┼────────────────────┼──── B2          │
+│  GPIO23 ────────┼────────────────────┼──── A           │
+│  GPIO19 ────────┼────────────────────┼──── B           │
+│  GPIO5  ────────┼────────────────────┼──── C           │
+│  GPIO17 ────────┼────────────────────┼──── D           │
+│  GPIO18 ────────┼────────────────────┼──── E           │
+│  GPIO4  ────────┼────────────────────┼──── LAT         │
+│  GPIO16 ────────┼────────────────────┼──── CLK         │
+│  GPIO15 ────────┼────────────────────┼──── OE          │
+│                 │                    │                 │
+│  GND    ────────┼────────────────────┼──── GND         │
+│                 │                    │                 │
+└─────────────────┘                    └─────────────────┘
+
+ESP32 Dev Board                        SD Card Module
+┌─────────────────┐                    ┌─────────────────┐
+│                 │                    │                 │
+│  5V     ────────┼────────────────────┼──── VCC (5V)    │
+│  GND    ────────┼────────────────────┼──── GND         │
+│  GPIO33 ────────┼────────────────────┼──── CS          │
+│  GPIO17 ────────┼────────────────────┼──── MOSI        │
+│  GPIO35 ────────┼────────────────────┼──── MISO        │
+│  GPIO5  ────────┼────────────────────┼──── SCK         │
+│                 │                    │                 │
+└─────────────────┘                    └─────────────────┘
+
+ESP32 Dev Board                        Button
+┌─────────────────┐                    ┌─────────────────┐
+│                 │                    │                 │
+│  GPIO32 ────────┼────────────────────┼──── Button Pin  │
+│                 │                    │                 │
+│  GND    ────────┼────────────────────┼──── GND         │
+│                 │                    │                 │
+└─────────────────┘                    └─────────────────┘
+
+
+Step-by-Step Connection Guide
+1. HUB75 Matrix (Critical — Connect First)
+Connect these 14 data lines from ESP32 to the matrix:
+
+ESP32 GPIO	HUB75 Signal
+25	R1
+26	G1
+27	B1
+14	R2
+12	G2
+13	B2
+23	A
+19	B
+5	C
+17	D
+18	E
+4	LAT
+16	CLK
+15	OE
+GND	GND (any)
+⚠️ Double-check these connections! One wrong pin can prevent the display from working entirely.
+
+2. SD Card Module (SPI Mode)
+The SD card uses the VSPI bus on ESP32:
+
+ESP32 GPIO	SD Module Pin
+5V or 3.3V	VCC
+GND	GND
+5	SCK
+17	MOSI
+35	MISO
+33	CS
+Note about GPIO35: This pin is input-only, which makes it perfect for MISO (no accidental output conflicts).
+
+3. Push Button
+The button uses ESP32's internal pull-up resistor, so no external resistor is needed:
+
+ESP32 GPIO	Button Connection
+32	One button terminal
+GND	Other button terminal
+How it works: The internal pull-up keeps the pin HIGH. When you press the button, it connects to GND and reads LOW.
+
+Power Supply Guide
+Power Requirements
+Critical: A 64x64 RGB matrix can draw significant current. Undersized power supplies cause flickering, random resets, or no display at all.
+
+Panel Size	Minimum PSU	Recommended PSU	Peak Current
+64x32 (1/16 scan)	5V 3A	5V 5A	2-3A
+64x64 (1/32 scan)	5V 5A	5V 10A	4-6A
+128x64 (1/32 scan)	5V 8A	5V 15A	8-12A
+Power Connection Best Practices
+Connect power directly to the matrix — Do not power the matrix through the ESP32
+
+Common ground — Connect GND from PSU to BOTH matrix and ESP32
+
+Use thick wires — 18 AWG or thicker for main power lines
+
+Add capacitor — 1000µF electrolytic across PSU output helps smooth current spikes
+
+Separate power for ESP32 — If flickering occurs, power ESP32 separately
+
+
+Picture Frame Mount (IKEA RIBBA Hack)
+This popular approach uses an IKEA RIBBA frame (21×30 cm):
+
+Materials needed:
+
+IKEA RIBBA frame (23x23cm or 21x30cm)
+
+Black acrylic paint for the backplate
+
+Copper wire for standoffs (~70cm of 1mm diameter)
+
+M3 machine screws (6x)
+
+Steps:
+
+Remove the backplate and paint it black
+
+Mount the matrix to the backplate using standoffs
+
+Secure ESP32 behind the matrix
+
+Drill hole for power cable
+
+Cut slot for SD card access if needed
+
+Wall-Mount Installation
+For permanent installation:
+
+Use a flush-mount backbox
+
+Add ventilation (matrix panels get warm)
+
+Consider a clear acrylic cover for protection
+
+Use angled connectors for power and data
+
+Portable Setup
+For battery-powered operation:
+
+Use a 5V power bank (20,000mAh+, 2A output minimum)
+
+Consider power bank with pass-through charging
+
+Add a power switch for the matrix
+
+Use right-angle jumper wires to save space
+
 
