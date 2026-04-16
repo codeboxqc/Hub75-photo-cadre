@@ -66,6 +66,9 @@ using fs::File;
 #define SD_MOSI    17
 #define SD_SCK      5
 
+#define DEBUG 0
+#define BUG 38
+// 18 
 
 // =============================================================================
 // PANEL CONFIGURATION
@@ -179,6 +182,15 @@ enum TransitionType {
     TRANS_RAIN = 27,           // New: falling rain drops
     TRANS_SHATTER = 28,        // New: glass shatter effect
     TRANS_WIPES = 29,          // New: multiple wipes directions
+    Blinds = 30, 
+    SlideRight  = 31, 
+    BlockWaterfall= 32, 
+   PixelRain  = 33, 
+   ScrollDown  = 34,  
+   Wind = 35,
+   PlasmaEdge =36,
+   Volcano =37,
+   Organic=38,
     TRANS_MAX
 };
 
@@ -445,6 +457,9 @@ void scanDirectory(File dir, const String& path) {
 
                 // Live counter on HUB75 during scan
                 showLoadingCount(imageCount);
+
+                if(DEBUG==1 && imageCount>10) break;
+
             }
         }
         entry.close();
@@ -529,12 +544,17 @@ bool initSPIFFS() {
         String name  = String(file.name());
         size_t fsize = file.size();
 
+        
+
         if (name.endsWith(".bin")) {
             Serial.printf("  %-25s %6d bytes\n", name.c_str(), fsize);
             imageFiles[imageCount++] = name.startsWith("/") ? name : "/" + name;
             showLoadingCount(imageCount);
+            
+            
         }
         file = root.openNextFile();
+        
     }
 
     if (imageCount > 0) {
@@ -918,7 +938,7 @@ void renderTransitionGenerative(uint16_t* from, uint16_t* to, float progress) {
 }
 
 // =============================================================================
-// TRANSITION 8: TOXIC SMOKE FOG
+// TRANSITION 8: TOXIC SMOKE FOG (No Green Tint)
 // =============================================================================
 void renderTransitionSmoke(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
@@ -933,15 +953,7 @@ void renderTransitionSmoke(uint16_t* from, uint16_t* to, float progress) {
             if (progress + smokeMask * 0.5f > 0.8f) {
                 display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
             } else {
-                // Tint to a toxic green slightly if in transition zone
-                if (progress > 0.1f && progress + smokeMask > 0.5f) {
-                    uint8_t r, g, b;
-                    rgb565_to_888(from[y * PANEL_RES_X + x], r, g, b);
-                    g = min(255, g + (int)(smokeMask * 100));
-                    display->drawPixel(x, y, display->color565(r, g, b));
-                } else {
-                    display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
-                }
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
             }
         }
     }
@@ -1029,36 +1041,44 @@ void renderTransitionFire(uint16_t* from, uint16_t* to, float progress) {
     }
 }
 
+ 
 // =============================================================================
-// TRANSITION 12: ICE COLD REVEAL
+// TRANSITION: ICE COLD (No Blue Tint - Pure Edge/Noise Reveal)
+// =============================================================================
+// =============================================================================
+// TRANSITION: ICE COLD (No Blue Tint - Wave Contour Reveal)
 // =============================================================================
 void renderTransitionIceCold(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
     
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
+            // Wave contour patterns
+            float wave1 = sin(x * 0.1f + progress * 8.0f) * cos(y * 0.1f - progress * 6.0f);
+            float wave2 = sin((x + y) * 0.12f + progress * 12.0f);
+            float wave3 = sin(x * 0.08f - progress * 10.0f) * 0.5f + cos(y * 0.08f + progress * 8.0f) * 0.5f;
+            
             // Ice crystal noise
             float iceNoise = valueNoise(x * 0.15f, y * 0.15f + progress * 10.0f);
-            float iceMask = (iceNoise + progress) / 2.0f;
             
-            // Frost spread - from edges inward
+            // Combine waves and noise for contour effect
+            float waveMask = (wave1 + wave2 + wave3) / 3.0f;
+            waveMask = (waveMask + 1.0f) / 2.0f; // Map from -1..1 to 0..1
+            
+            float contourMask = (waveMask * 0.7f + iceNoise * 0.3f);
+            
+            // Frost spread from edges inward with wave modulation
             float edgeDist = min(min(x, PANEL_RES_X - 1 - x), min(y, PANEL_RES_Y - 1 - y));
             float edgeFactor = 1.0f - (edgeDist / (PANEL_RES_X / 2.0f));
-            float finalMask = (iceMask + edgeFactor) / 2.0f;
             
-            if (progress > finalMask * 0.9f) {
-                // Add cold blue tint
-                uint8_t r, g, b;
-                rgb565_to_888(to[y * PANEL_RES_X + x], r, g, b);
-                b = min(255, b + 40);
-                g = max(0, g - 20);
-                display->drawPixel(x, y, display->color565(r, g, b));
-            } else if (progress < 0.3f && finalMask > progress) {
-                // Cold tint on old image
-                uint8_t r, g, b;
-                rgb565_to_888(from[y * PANEL_RES_X + x], r, g, b);
-                b = min(255, b + 60);
-                display->drawPixel(x, y, display->color565(r, g, b));
+            // Wave that pulses from edges
+            float edgeWave = sin(edgeDist * 0.3f - progress * 15.0f);
+            edgeWave = (edgeWave + 1.0f) / 2.0f;
+            
+            float finalMask = (contourMask * 0.5f + edgeFactor * 0.3f + edgeWave * 0.2f);
+            
+            if (progress > finalMask) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
             } else {
                 display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
             }
@@ -1134,7 +1154,7 @@ void renderTransitionPinwheel(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
     float centerX = PANEL_RES_X / 2.0f;
     float centerY = PANEL_RES_Y / 2.0f;
-    float wedgeAngle = progress * TWO_PI * 2.0f;
+    float wedgeAngle = progress * TWO_PI * 1.0f;
     
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
@@ -1156,7 +1176,7 @@ void renderTransitionPinwheel(uint16_t* from, uint16_t* to, float progress) {
                 inWedge = (angle >= wedgeStart || angle <= wedgeEnd);
             }
             
-            if (inWedge || progress > 0.95f) {
+            if (inWedge || progress > 0.96f) {
                 display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
             } else {
                 display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
@@ -1225,40 +1245,103 @@ void renderTransitionBlur(uint16_t* from, uint16_t* to, float progress) {
 // =============================================================================
 // TRANSITION 18: SPLIT AND SLIDE
 // =============================================================================
+// =============================================================================
+// TRANSITION 18: VENETIAN BLIND SPLIT (Smooth Curtain Reveal)
+// =============================================================================
 void renderTransitionSplit(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
-    int splitX = (int)(PANEL_RES_X * progress);
-    int splitY = (int)(PANEL_RES_Y * progress);
+    float easedProgress = progress * progress * (3.0f - 2.0f * progress);
+    
+    // Number of vertical blinds
+    int blindCount = 12;
+    float blindWidth = (float)PANEL_RES_X / blindCount;
     
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
-            // Screen splits into quadrants that slide
-            bool showNew = false;
-            if (x < splitX && y < splitY) showNew = true;           // Top-left
-            else if (x >= splitX && y < splitY) showNew = true;     // Top-right  
-            else if (x < splitX && y >= splitY) showNew = true;     // Bottom-left
-            else if (x >= splitX && y >= splitY) showNew = true;    // Bottom-right
+            // Which blind panel does this pixel belong to?
+            int blindIndex = x / blindWidth;
+            float blindOffset = fmodf(x, blindWidth) / blindWidth;
+            
+            // Each blind opens with slight delay based on index
+            float blindProgress = easedProgress * 1.2f - (blindIndex * 0.08f);
+            blindProgress = constrain(blindProgress, 0.0f, 1.0f);
+            
+            // Curtain opens from center of each blind
+            float centerOffset = fabsf(blindOffset - 0.5f) * 2.0f;
+            bool showNew = centerOffset < blindProgress;
+            
+            // Feathering for smooth edge
+            float featherZone = 0.15f;
+            float blendFactor = 0.0f;
             
             if (showNew) {
+                blendFactor = 1.0f - constrain((centerOffset - blindProgress + featherZone) / featherZone, 0.0f, 1.0f);
+                blendFactor = blendFactor * blendFactor;
+            } else if (centerOffset > blindProgress && centerOffset < blindProgress + featherZone) {
+                blendFactor = constrain((centerOffset - blindProgress) / featherZone, 0.0f, 1.0f);
+                blendFactor = 1.0f - blendFactor * blendFactor;
+            }
+            
+            if (blendFactor > 0.99f) {
                 display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
-            } else {
+            } else if (blendFactor < 0.01f) {
                 display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            } else {
+                // Smooth blend at the curtain edge
+                uint16_t fromPixel = from[y * PANEL_RES_X + x];
+                uint16_t toPixel = to[y * PANEL_RES_X + x];
+                uint8_t r1, g1, b1, r2, g2, b2;
+                rgb565_to_888(fromPixel, r1, g1, b1);
+                rgb565_to_888(toPixel, r2, g2, b2);
+                
+                uint8_t r = r1 * (1.0f - blendFactor) + r2 * blendFactor;
+                uint8_t g = g1 * (1.0f - blendFactor) + g2 * blendFactor;
+                uint8_t b = b1 * (1.0f - blendFactor) + b2 * blendFactor;
+                
+                display->drawPixel(x, y, display->color565(r, g, b));
+            }
+        }
+    }
+    
+    // Final cleanup
+    if (progress >= 0.99f) {
+        for (int y = 0; y < PANEL_RES_Y; y++) {
+            for (int x = 0; x < PANEL_RES_X; x++) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
             }
         }
     }
 }
 
+
+
 // =============================================================================
 // TRANSITION 19: BOUNCE / EXPANDING CIRCLE
 // =============================================================================
+// =============================================================================
+// TRANSITION: BOUNCE SPRING (Smooth Elastic Reveal)
+// =============================================================================
 void renderTransitionBounce(uint16_t* from, uint16_t* to, float progress) {
-    progress = constrain(progress, 0.0f, 1.0f);
+    progress = constrain(progress, 0.0f, 1.5f);
     float centerX = PANEL_RES_X / 2.0f;
     float centerY = PANEL_RES_Y / 2.0f;
     
-    // Bounce effect - radius expands, then contracts, then expands
-    float bounceProgress = sinf(progress * PI);
-    float radius = (centerX + centerY) / 2.0f * bounceProgress;
+    // Elastic bounce easing - overshoots then settles
+    float easedProgress;
+    if (progress < 0.5f) {
+        // First half: expanding outward with bounce
+        float t = progress * 1.5f;
+        easedProgress = 4.0f * t * t * t; // Cubic in
+    } else {
+        // Second half: settling into place
+        float t = (progress - 0.5f) * 1.0f;
+        easedProgress = 1.0f - powf(2.0f, -10.0f * t) * cosf((t - 0.1f) * 15.0f);
+    }
+    
+    // Springy radius that pulses slightly at the end
+    float springRadius = (centerX + centerY) / 0.5f * easedProgress;
+    float overshoot = sinf(progress * PI * 3.0f) * (1.0f - progress) * 10.0f;
+    float radius = springRadius + overshoot;
     
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
@@ -1266,65 +1349,133 @@ void renderTransitionBounce(uint16_t* from, uint16_t* to, float progress) {
             float dy = y - centerY;
             float dist = sqrtf(dx*dx + dy*dy);
             
-            if (dist < radius) {
+            // Feathering zone for smooth edge
+            float featherZone = 8.0f;
+            float blendFactor = 0.0f;
+            
+            if (dist < radius - featherZone) {
+                // Fully inside - show new image
                 display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
-            } else {
+            } 
+            else if (dist > radius + featherZone) {
+                // Fully outside - show old image
                 display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+            else {
+                // Smooth blend in the transition zone
+                if (dist < radius) {
+                    blendFactor = 1.0f - ((radius - dist) / featherZone);
+                } else {
+                    blendFactor = (featherZone - (dist - radius)) / featherZone;
+                }
+                blendFactor = constrain(blendFactor, 0.0f, 1.0f);
+                blendFactor = blendFactor * blendFactor * (3.0f - 2.0f * blendFactor); // Smoothstep
+                
+                uint16_t fromPixel = from[y * PANEL_RES_X + x];
+                uint16_t toPixel = to[y * PANEL_RES_X + x];
+                uint8_t r1, g1, b1, r2, g2, b2;
+                rgb565_to_888(fromPixel, r1, g1, b1);
+                rgb565_to_888(toPixel, r2, g2, b2);
+                
+                uint8_t r = r1 * (1.0f - blendFactor) + r2 * blendFactor;
+                uint8_t g = g1 * (1.0f - blendFactor) + g2 * blendFactor;
+                uint8_t b = b1 * (1.0f - blendFactor) + b2 * blendFactor;
+                
+                display->drawPixel(x, y, display->color565(r, g, b));
             }
         }
     }
 }
- // Add these to your TransitionType enum (before TRANS_MAX):
 
 
+ //20
 // =============================================================================
-// TRANSITION 20: PARTICLE EXPLOSION
+// TRANSITION: PARTICLE MERGE (Slow Assembly of Image B)
 // =============================================================================
 void renderTransitionParticles(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
     
-    // Particle count increases with progress
-    int particleCount = (int)(progress * 800);
+    // Smooth easing for gradual merge
+    float easedProgress = progress * progress * (3.0f - 2.0f * progress);
     
-    // First, show mostly old image with particles of new image appearing
+    // Particle density increases over time
+    int maxParticles = 2200;
+    int particleCount = (int)(easedProgress * maxParticles);
+    
+    // Clear screen with blending between images
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
-            display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            // Base layer fades from A to B very slowly
+            float baseBlend = easedProgress * 0.3f; // Only 30% blend in background
+            uint16_t fromPixel = from[y * PANEL_RES_X + x];
+            uint16_t toPixel = to[y * PANEL_RES_X + x];
+            uint8_t r1, g1, b1, r2, g2, b2;
+            rgb565_to_888(fromPixel, r1, g1, b1);
+            rgb565_to_888(toPixel, r2, g2, b2);
+            
+            uint8_t rBg = r1 * (1.0f - baseBlend) + r2 * baseBlend;
+            uint8_t gBg = g1 * (1.0f - baseBlend) + g2 * baseBlend;
+            uint8_t bBg = b1 * (1.0f - baseBlend) + b2 * baseBlend;
+            
+            display->drawPixel(x, y, display->color565(rBg, gBg, bBg));
         }
     }
     
-    // Draw exploding particles
+    // Particles slowly assemble to form image B
     for (int i = 0; i < particleCount; i++) {
-        // Use deterministic pseudo-random based on progress and index
-        float rnd = hash21(i, (int)(progress * 1000));
-        int px = (int)(rnd * PANEL_RES_X);
-        int py = (int)(hash21(i, (int)(progress * 2000)) * PANEL_RES_Y);
+        // Target position (where particle should end up)
+        float targetX_f = hash21(i * 2, 0) * PANEL_RES_X;
+        float targetY_f = hash21(i * 2, 1) * PANEL_RES_Y;
+        int targetX = (int)targetX_f;
+        int targetY = (int)targetY_f;
         
-        // Particle velocity - outward from center
-        float centerX = PANEL_RES_X / 2.0f;
-        float centerY = PANEL_RES_Y / 2.0f;
-        float dx = px - centerX;
-        float dy = py - centerY;
-        float dist = sqrtf(dx*dx + dy*dy);
-        float maxDist = sqrtf(centerX*centerX + centerY*centerY);
-        float speedFactor = progress * (1.0f - dist / maxDist);
-        
-        int srcX = constrain(px + (int)(dx * speedFactor), 0, PANEL_RES_X - 1);
-        int srcY = constrain(py + (int)(dy * speedFactor), 0, PANEL_RES_Y - 1);
-        
-        display->drawPixel(px, py, to[srcY * PANEL_RES_X + srcX]);
-        
-        // Draw particle glow (3x3 block)
-        if (i % 3 == 0 && progress > 0.3f) {
-            for (int ox = -1; ox <= 1; ox++) {
-                for (int oy = -1; oy <= 1; oy++) {
-                    int nx = px + ox, ny = py + oy;
-                    if (nx >= 0 && nx < PANEL_RES_X && ny >= 0 && ny < PANEL_RES_Y) {
-                        if (hash21(i * 10 + ox, oy) > 0.7f) {
-                            display->drawPixel(nx, ny, to[srcY * PANEL_RES_X + srcX]);
+        // Current position - drifts toward target
+        float driftProgress = easedProgress;
+        if (driftProgress < 0.97f) {
+            // Particles drift from random start positions to targets
+            float startX = hash21(i, 3) * PANEL_RES_X;
+            float startY = hash21(i, 4) * PANEL_RES_Y;
+            
+            // Ease in/out for smooth arrival
+            float moveEase = driftProgress * driftProgress * (3.0f - 2.0f * driftProgress);
+            float currentX = startX * (1.0f - moveEase) + targetX * moveEase;
+            float currentY = startY * (1.0f - moveEase) + targetY * moveEase;
+            
+            // Add slight wobble during movement
+            float wobbleX = sin(driftProgress * PI * 4.0f + i) * (1.0f - driftProgress) * 3.0f;
+            float wobbleY = cos(driftProgress * PI * 3.0f + i * 1.3f) * (1.0f - driftProgress) * 3.0f;
+            
+            int px = constrain((int)(currentX + wobbleX), 0, PANEL_RES_X - 1);
+            int py = constrain((int)(currentY + wobbleY), 0, PANEL_RES_Y - 1);
+            
+            // Draw particle from target image
+            display->drawPixel(px, py, to[targetY * PANEL_RES_X + targetX]);
+            
+            // Small glow around particle
+            if (easedProgress > 0.2f && (i % 2 == 0)) {
+                for (int ox = -1; ox <= 1; ox++) {
+                    for (int oy = -1; oy <= 1; oy++) {
+                        if (ox == 0 && oy == 0) continue;
+                        int nx = px + ox, ny = py + oy;
+                        if (nx >= 0 && nx < PANEL_RES_X && ny >= 0 && ny < PANEL_RES_Y) {
+                            if (hash21(i * 10 + ox * 3, oy * 5) > 0.6f) {
+                                display->drawPixel(nx, ny, to[targetY * PANEL_RES_X + targetX]);
+                            }
                         }
                     }
                 }
+            }
+        } else {
+            // Final stage: particles lock into place
+            display->drawPixel(targetX, targetY, to[targetY * PANEL_RES_X + targetX]);
+        }
+    }
+    
+    // Final cleanup - ensure image B is fully displayed at the end
+    if (progress >= 0.99f) {
+        for (int y = 0; y < PANEL_RES_Y; y++) {
+            for (int x = 0; x < PANEL_RES_X; x++) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
             }
         }
     }
@@ -1333,59 +1484,102 @@ void renderTransitionParticles(uint16_t* from, uint16_t* to, float progress) {
 // =============================================================================
 // TRANSITION 21: ATOMIC EXPLOSION / SHOCKWAVE
 // =============================================================================
+ 
 void renderTransitionAtomic(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
     float centerX = PANEL_RES_X / 2.0f;
     float centerY = PANEL_RES_Y / 2.0f;
     
-    // Expanding shockwave ring
-    float shockwaveRadius = (centerX + centerY) / 2.0f * progress;
-    float shockwaveWidth = 6.0f * (1.0f - progress) + 2.0f;
+    // Smooth explosion easing
+    float easedProgress = progress * progress * (3.0f - 2.0f * progress);
     
-    // Flash intensity (bright white at start)
-    float flashIntensity = max(0.0f, 1.0f - progress * 3.0f);
+    // Expanding shockwave
+    float shockwaveRadius = (centerX + centerY) / 2.0f * easedProgress;
+    float shockwaveWidth = 8.0f * (1.0f - easedProgress) + 3.0f;
+    
+    // Flash fades out as progress increases
+    float flashIntensity = max(0.0f, 1.0f - easedProgress * 2.5f);
+    
+    // Heat distortion amount
+    float heatDistortion = 5.0f * (1.0f - easedProgress);
     
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
             float dx = x - centerX;
             float dy = y - centerY;
             float dist = sqrtf(dx*dx + dy*dy);
+            float angle = atan2f(dy, dx);
             
-            // Shockwave ring
+            // Heat shimmer distortion
+            float distortion = sinf(dist * 0.3f - easedProgress * 25.0f) * heatDistortion;
+            distortion += cosf(angle * 3.0f + easedProgress * 15.0f) * 2.0f;
+            
+            int srcX = constrain(x + (int)(cosf(angle) * distortion), 0, PANEL_RES_X - 1);
+            int srcY = constrain(y + (int)(sinf(angle) * distortion), 0, PANEL_RES_Y - 1);
+            
+            // Blend between A and B based on shockwave position
+            float blendFactor = 0.0f;
             float distToRing = fabsf(dist - shockwaveRadius);
             
             if (dist < shockwaveRadius - shockwaveWidth) {
-                // Inside shockwave - show new image with distortion
-                float angle = atan2f(dy, dx);
-                float distortion = sinf(dist * 0.5f - progress * 20.0f) * 3.0f;
-                int srcX = constrain(x + (int)(cosf(angle) * distortion), 0, PANEL_RES_X - 1);
-                int srcY = constrain(y + (int)(sinf(angle) * distortion), 0, PANEL_RES_Y - 1);
-                uint16_t color = to[srcY * PANEL_RES_X + srcX];
-                
-                // Add flash whiteout
-                if (flashIntensity > 0.1f) {
-                    uint8_t r, g, b;
-                    rgb565_to_888(color, r, g, b);
-                    r = min(255, r + (int)(flashIntensity * 200));
-                    g = min(255, g + (int)(flashIntensity * 200));
-                    b = min(255, b + (int)(flashIntensity * 200));
-                    color = display->color565(r, g, b);
-                }
-                display->drawPixel(x, y, color);
-            } else if (distToRing < shockwaveWidth) {
-                // Shockwave ring - bright white/yellow
-                float intensity = 1.0f - (distToRing / shockwaveWidth);
-                uint8_t val = (uint8_t)(200 + intensity * 55);
-                display->drawPixel(x, y, display->color565(val, val, 100 + (int)(intensity * 155)));
-            } else {
-                // Outside shockwave - old image with burn effect
-                uint8_t r, g, b;
-                rgb565_to_888(from[y * PANEL_RES_X + x], r, g, b);
-                // Burn edges
-                float edgeFactor = min(1.0f, dist / (centerX * 0.5f));
-                r = min(255, r + (int)(edgeFactor * 100 * progress));
-                g = max(0, g - (int)(edgeFactor * 80 * progress));
-                display->drawPixel(x, y, display->color565(r, g, b));
+                // Inside explosion - mostly image B
+                blendFactor = 0.9f + (1.0f - easedProgress) * 0.1f;
+            } 
+            else if (distToRing < shockwaveWidth) {
+                // Shockwave edge - turbulent mix
+                float ringPos = distToRing / shockwaveWidth;
+                float turbulence = sinf(dist * 0.5f - easedProgress * 30.0f);
+                blendFactor = 0.5f + ringPos * 0.3f + turbulence * 0.2f;
+                blendFactor = constrain(blendFactor, 0.3f, 0.9f);
+            }
+            else {
+                // Outside explosion - mostly image A
+                blendFactor = max(0.0f, 0.1f - (easedProgress * 0.3f));
+            }
+            
+            // Add flash overlay
+            if (flashIntensity > 0.05f) {
+                blendFactor = blendFactor * (1.0f - flashIntensity * 0.5f);
+            }
+            
+            // Get source pixels
+            uint16_t pixelA = from[y * PANEL_RES_X + x];
+            uint16_t pixelB = to[srcY * PANEL_RES_X + srcX];
+            
+            uint8_t r1, g1, b1, r2, g2, b2;
+            rgb565_to_888(pixelA, r1, g1, b1);
+            rgb565_to_888(pixelB, r2, g2, b2);
+            
+            // Blend with atomic fire tint
+            float fireTint = sinf(easedProgress * PI) * (1.0f - easedProgress);
+            
+            uint8_t r = r1 * (1.0f - blendFactor) + r2 * blendFactor;
+            uint8_t g = g1 * (1.0f - blendFactor) + g2 * blendFactor;
+            uint8_t b = b1 * (1.0f - blendFactor) + b2 * blendFactor;
+            
+            // Add fire tint during explosion (orange/red)
+            if (fireTint > 0.1f) {
+                r = min(255, r + (int)(fireTint * 100));
+                g = max(0, g - (int)(fireTint * 30));
+                b = max(0, b - (int)(fireTint * 80));
+            }
+            
+            // Flash whiteout
+            if (flashIntensity > 0.05f) {
+                r = min(255, r + (int)(flashIntensity * 150));
+                g = min(255, g + (int)(flashIntensity * 150));
+                b = min(255, b + (int)(flashIntensity * 100));
+            }
+            
+            display->drawPixel(x, y, display->color565(r, g, b));
+        }
+    }
+    
+    // Final cleanup - ensure pure image B at the end
+    if (progress >= 0.99f) {
+        for (int y = 0; y < PANEL_RES_Y; y++) {
+            for (int x = 0; x < PANEL_RES_X; x++) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
             }
         }
     }
@@ -1423,52 +1617,118 @@ void renderTransitionZigzag(uint16_t* from, uint16_t* to, float progress) {
     }
 }
 
+ 
 // =============================================================================
-// TRANSITION 23: OIL PAINTING SMEAR
+// TRANSITION: OIL PAINTING (Full Screen Brush Reveal)
 // =============================================================================
 void renderTransitionOilPainting(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
-    int smearRadius = (int)(5 * (1.0f - progress)) + 1;
+    
+    // Smooth easing
+    float easedProgress = progress * progress * (3.0f - 2.0f * progress);
+    
+    // Smear radius decreases as painting completes
+    int smearRadius = (int)(6 * (1.0f - easedProgress)) + 2;
     
     for (int y = 0; y < PANEL_RES_Y; y += 2) {
         for (int x = 0; x < PANEL_RES_X; x += 2) {
-            // Smear direction - swirling motion
-            float angle = atan2f(y - PANEL_RES_Y/2, x - PANEL_RES_X/2) + progress * 10.0f;
+            // Swirling brush direction based on position and progress
+            float centerX = PANEL_RES_X / 2.0f;
+            float centerY = PANEL_RES_Y / 2.0f;
+            float angle = atan2f(y - centerY, x - centerX) + easedProgress * 12.0f;
+            
+            // Add spiral effect
+            float radius = sqrtf((x - centerX)*(x - centerX) + (y - centerY)*(y - centerY));
+            angle += radius * 0.05f;
+            
             int offsetX = (int)(cosf(angle) * smearRadius);
             int offsetY = (int)(sinf(angle) * smearRadius);
             
             int srcX = constrain(x + offsetX, 0, PANEL_RES_X - 1);
             int srcY = constrain(y + offsetY, 0, PANEL_RES_Y - 1);
             
-            float mixFactor = progress * (1.0f - (float)(x + y) / (PANEL_RES_X + PANEL_RES_Y));
-            mixFactor = constrain(mixFactor, 0.0f, 1.0f);
+            // Mix factor based on progress only (not position)
+            float mixFactor = easedProgress;
             
-            if (mixFactor > 0.5f) {
-                uint16_t color = to[srcY * PANEL_RES_X + srcX];
-                // Paintbrush effect - fill block
-                for (int dy = 0; dy < 2 && y + dy < PANEL_RES_Y; dy++) {
-                    for (int dx = 0; dx < 2 && x + dx < PANEL_RES_X; dx++) {
-                        // Add slight color variation for brush stroke effect
-                        float variation = 0.8f + hash21(x + dx, y + dy) * 0.4f;
-                        uint8_t r, g, b;
-                        rgb565_to_888(color, r, g, b);
-                        r = (uint8_t)(r * variation);
-                        g = (uint8_t)(g * variation);
-                        b = (uint8_t)(b * variation);
-                        display->drawPixel(x + dx, y + dy, display->color565(r, g, b));
+            // Add slight noise for organic paint effect
+            float noise = valueNoise(x * 0.1f, y * 0.1f) * 0.2f;
+            mixFactor = constrain(mixFactor + noise, 0.0f, 1.0f);
+            
+            // Determine if this brush stroke shows new or old image
+            float threshold = 0.5f;
+            
+            if (mixFactor > threshold) {
+                // Show painted strokes of new image
+                float strength = (mixFactor - threshold) / (1.0f - threshold);
+                strength = constrain(strength, 0.0f, 1.0f);
+                strength = strength * strength; // Quadratic for smoother reveal
+                
+                if (strength > 0.95f) {
+                    // Fully show new image
+                    for (int dy = 0; dy < 2 && y + dy < PANEL_RES_Y; dy++) {
+                        for (int dx = 0; dx < 2 && x + dx < PANEL_RES_X; dx++) {
+                            display->drawPixel(x + dx, y + dy, to[(y+dy) * PANEL_RES_X + (x+dx)]);
+                        }
+                    }
+                } else {
+                    // Blend brush stroke
+                    for (int dy = 0; dy < 2 && y + dy < PANEL_RES_Y; dy++) {
+                        for (int dx = 0; dx < 2 && x + dx < PANEL_RES_X; dx++) {
+                            uint16_t fromPixel = from[(y+dy) * PANEL_RES_X + (x+dx)];
+                            uint16_t toPixel = to[(y+dy) * PANEL_RES_X + (x+dx)];
+                            
+                            uint8_t r1, g1, b1, r2, g2, b2;
+                            rgb565_to_888(fromPixel, r1, g1, b1);
+                            rgb565_to_888(toPixel, r2, g2, b2);
+                            
+                            // Paint stroke texture
+                            float strokeVar = 0.8f + hash21(x + dx, y + dy) * 0.4f;
+                            
+                            uint8_t r = r1 * (1.0f - strength) + r2 * strength;
+                            uint8_t g = g1 * (1.0f - strength) + g2 * strength;
+                            uint8_t b = b1 * (1.0f - strength) + b2 * strength;
+                            
+                            r = (uint8_t)(r * strokeVar);
+                            g = (uint8_t)(g * strokeVar);
+                            b = (uint8_t)(b * strokeVar);
+                            
+                            display->drawPixel(x + dx, y + dy, display->color565(r, g, b));
+                        }
                     }
                 }
             } else {
-                // Show old image
+                // Show old image with slight smear
+                float strength = 1.0f - (mixFactor / threshold);
                 for (int dy = 0; dy < 2 && y + dy < PANEL_RES_Y; dy++) {
                     for (int dx = 0; dx < 2 && x + dx < PANEL_RES_X; dx++) {
-                        display->drawPixel(x + dx, y + dy, from[(y+dy) * PANEL_RES_X + (x+dx)]);
+                        if (strength > 0.9f) {
+                            display->drawPixel(x + dx, y + dy, from[(y+dy) * PANEL_RES_X + (x+dx)]);
+                        } else {
+                            // Slightly smeared old image
+                            int smearX = constrain(x + dx + (int)(offsetX * strength * 0.5f), 0, PANEL_RES_X - 1);
+                            int smearY = constrain(y + dy + (int)(offsetY * strength * 0.5f), 0, PANEL_RES_Y - 1);
+                            display->drawPixel(x + dx, y + dy, from[smearY * PANEL_RES_X + smearX]);
+                        }
                     }
                 }
             }
         }
     }
+    
+    // Final cleanup for full image B
+    if (progress >= 0.99f) {
+        for (int y = 0; y < PANEL_RES_Y; y++) {
+            for (int x = 0; x < PANEL_RES_X; x++) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            }
+        }
+    }
 }
+
+
+
+ 
+
 
 // =============================================================================
 // TRANSITION 24: ORGANIC MORPHING
@@ -1514,43 +1774,38 @@ void renderTransitionMorph(uint16_t* from, uint16_t* to, float progress) {
 // =============================================================================
 // TRANSITION 25: BUMP / DISPLACEMENT MAP
 // =============================================================================
+ 
 void renderTransitionBump(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
+    float eased = progress * progress * (3.0f - 2.0f * progress);
     
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
-            // 3D bump effect using multiple noise layers
-            float bumpX = (valueNoise(x * 0.1f, y * 0.1f) - 0.5f) * 12.0f * (1.0f - progress);
-            float bumpY = (valueNoise(x * 0.08f + 10.0f, y * 0.08f + 5.0f) - 0.5f) * 12.0f * (1.0f - progress);
+            // Crystal shatter pattern
+            float crystal1 = sin(x * 0.2f + progress * 15.0f) * cos(y * 0.2f);
+            float crystal2 = sin((x + y) * 0.15f - progress * 20.0f);
+            float shatter = (crystal1 + crystal2) / 2.0f;
+            shatter = (shatter + 1.0f) / 2.0f;
             
-            // Add circular bump from center
-            float centerX = PANEL_RES_X / 2.0f;
-            float centerY = PANEL_RES_Y / 2.0f;
-            float dx = x - centerX;
-            float dy = y - centerY;
-            float dist = sqrtf(dx*dx + dy*dy) / (centerX + centerY);
-            float circularBump = sinf(dist * PI) * 8.0f * progress;
-            bumpX += dx * circularBump / (dist + 0.1f);
-            bumpY += dy * circularBump / (dist + 0.1f);
+            // Shatter spreads like cracking ice
+            float crackProgress = eased * 1.5f;
+            bool showNew = (shatter + progress) > 1.2f;
             
-            int srcX = constrain(x + (int)bumpX, 0, PANEL_RES_X - 1);
-            int srcY = constrain(y + (int)bumpY, 0, PANEL_RES_Y - 1);
-            
-            // Lighting effect based on bump slope
-            float slopeX = bumpX - (valueNoise((x+1) * 0.1f, y * 0.1f) - 0.5f) * 12.0f * (1.0f - progress);
-            float slopeY = bumpY - (valueNoise(x * 0.08f + 10.0f, (y+1) * 0.08f + 5.0f) - 0.5f) * 12.0f * (1.0f - progress);
-            float light = 0.7f + (slopeX + slopeY) * 0.05f;
-            light = constrain(light, 0.3f, 1.0f);
-            
-            uint8_t r, g, b;
-            rgb565_to_888(to[srcY * PANEL_RES_X + srcX], r, g, b);
-            r = (uint8_t)(r * light);
-            g = (uint8_t)(g * light);
-            b = (uint8_t)(b * light);
-            display->drawPixel(x, y, display->color565(r, g, b));
+            if (showNew) {
+                // Add slight frost to new image
+                uint8_t r, g, b;
+                rgb565_to_888(to[y * PANEL_RES_X + x], r, g, b);
+                r = r * 0.9f;
+                b = min(255, b + 20);
+                display->drawPixel(x, y, display->color565(r, g, b));
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
         }
     }
 }
+
+
 
 // =============================================================================
 // TRANSITION 26: STARBURST RADIAL
@@ -1595,7 +1850,7 @@ void renderTransitionStarburst(uint16_t* from, uint16_t* to, float progress) {
 // =============================================================================
 void renderTransitionRain(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
-    int dropCount = (int)(progress * 200);
+    int dropCount = (int)(progress * 222);
     
     // Start with old image
     for (int y = 0; y < PANEL_RES_Y; y++) {
@@ -1677,7 +1932,7 @@ void renderTransitionShatter(uint16_t* from, uint16_t* to, float progress) {
             
             if (crackDistance < 2.0f) {
                 // Crack - bright line
-                display->drawPixel(x, y, display->color565(200, 200, 255));
+                display->drawPixel(x, y, display->color565(200, 200, 155));
             } else if (progress > 0.3f && hash21(x, y) < progress * 0.8f) {
                 // Shattered area reveals new image
                 int offsetX = (int)((hash21(x + 100, y) - 0.5f) * 8 * progress);
@@ -1699,38 +1954,153 @@ void renderTransitionShatter(uint16_t* from, uint16_t* to, float progress) {
 // =============================================================================
 // TRANSITION 29: MULTI-DIRECTION WIPES
 // =============================================================================
+ 
 void renderTransitionWipes(uint16_t* from, uint16_t* to, float progress) {
     progress = constrain(progress, 0.0f, 1.0f);
+    float easedProgress = progress * progress * (3.0f - 2.0f * progress);
     
-    // Choose wipe pattern based on progress sub-phase
-    int pattern = (int)(progress * 8) % 4;
-    float subProgress = fmodf(progress * 4, 1.0f);
+    // Matrix rain parameters
+    int numDrops = 80;
+    float rainSpeed = 8.0f;
+    
+    // First, draw the base blended image (A fading to B)
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // XOR blend factor based on progress
+            float blendFactor = easedProgress;
+            
+            uint16_t pixelA = from[y * PANEL_RES_X + x];
+            uint16_t pixelB = to[y * PANEL_RES_X + x];
+            
+            uint8_t r1, g1, b1, r2, g2, b2;
+            rgb565_to_888(pixelA, r1, g1, b1);
+            rgb565_to_888(pixelB, r2, g2, b2);
+            
+            // XOR-like transition: colors shift and invert
+            uint8_t r = r1 ^ (uint8_t)(r2 * blendFactor);
+            uint8_t g = g1 ^ (uint8_t)(g2 * blendFactor);
+            uint8_t b = b1 ^ (uint8_t)(b2 * blendFactor);
+            
+            // Matrix green tint on background
+            float matrixTint = (1.0f - easedProgress) * 0.3f;
+            g = min(255, g + (int)(matrixTint * 80));
+            r = max(0, r - (int)(matrixTint * 40));
+            b = max(0, b - (int)(matrixTint * 60));
+            
+            display->drawPixel(x, y, display->color565(r, g, b));
+        }
+    }
+    
+    // Draw falling digital rain particles
+    for (int i = 0; i < numDrops; i++) {
+        // Deterministic positions that shift with progress
+        float dropX_f = fmodf(hash21(i, 0) * PANEL_RES_X + progress * 100.0f, PANEL_RES_X);
+        int dropX = (int)dropX_f;
+        
+        float dropY_f = fmodf(hash21(i, 1) * PANEL_RES_Y + progress * rainSpeed * 20.0f, PANEL_RES_Y * 1.5f);
+        int dropY = (int)(dropY_f - PANEL_RES_Y * 0.5f);
+        
+        if (dropY >= 0 && dropY < PANEL_RES_Y) {
+            // Get pixel from target image for the rain
+            uint16_t targetPixel = to[dropY * PANEL_RES_X + dropX];
+            uint8_t r, g, b;
+            rgb565_to_888(targetPixel, r, g, b);
+            
+            // Matrix green colorization
+            float intensity = 0.5f + 0.5f * sinf(progress * 20.0f + i);
+            r = (uint8_t)(r * 0.2f * intensity);
+            g = (uint8_t)(255 * intensity);
+            b = (uint8_t)(b * 0.1f * intensity);
+            
+            // Draw drop head (bright)
+            display->drawPixel(dropX, dropY, display->color565(r, g, b));
+            
+            // Draw trail
+            for (int t = 1; t <= 4; t++) {
+                int trailY = dropY - t * 2;
+                if (trailY >= 0 && trailY < PANEL_RES_Y) {
+                    float trailIntensity = intensity * (1.0f - t / 5.0f);
+                    uint8_t trailR = (uint8_t)(r * trailIntensity);
+                    uint8_t trailG = (uint8_t)(g * trailIntensity);
+                    uint8_t trailB = (uint8_t)(b * trailIntensity);
+                    display->drawPixel(dropX, trailY, display->color565(trailR, trailG, trailB));
+                }
+            }
+        }
+    }
+    
+    // XOR flash at the end
+    if (progress > 0.95f) {
+        float flashIntensity = (progress - 0.95f) / 0.05f;
+        for (int y = 0; y < PANEL_RES_Y; y += 4) {
+            for (int x = 0; x < PANEL_RES_X; x += 4) {
+                if (hash21(x, y) > 0.7f) {
+                    uint16_t pixel = to[y * PANEL_RES_X + x];
+                    uint8_t r, g, b;
+                    rgb565_to_888(pixel, r, g, b);
+                    r = min(255, r + (int)(flashIntensity * 200));
+                    g = min(255, g + (int)(flashIntensity * 200));
+                    b = min(255, b + (int)(flashIntensity * 200));
+                    display->drawPixel(x, y, display->color565(r, g, b));
+                }
+            }
+        }
+    }
+    
+    // Final cleanup
+    if (progress >= 0.99f) {
+        for (int y = 0; y < PANEL_RES_Y; y++) {
+            for (int x = 0; x < PANEL_RES_X; x++) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+
+
+// =============================================================================
+// TRANSITION 30: CLEAN SCROLL DOWN (A falls off, B revealed underneath)
+// =============================================================================
+void renderTransitionScrollDown(uint16_t* from, uint16_t* to, float progress) {
+    // Eased time for a very smooth cinematic feel
+    float eased = progress * progress * (3.0f - 2.0f * progress);
     
     for (int y = 0; y < PANEL_RES_Y; y++) {
         for (int x = 0; x < PANEL_RES_X; x++) {
-            bool showNew = false;
+            // Low frequency noise creates patchy, cloud-like dissolves
+            float noise = valueNoise(x * 0.05f, y * 0.05f);
             
-            switch (pattern) {
-                case 0: // Diagonal wipe
-                    showNew = (x + y) < (PANEL_RES_X + PANEL_RES_Y) * subProgress;
-                    break;
-                case 1: // Center out
-                    showNew = (abs(x - PANEL_RES_X/2) + abs(y - PANEL_RES_Y/2)) < 
-                              (PANEL_RES_X/2 + PANEL_RES_Y/2) * subProgress;
-                    break;
-                case 2: // Checkerboard
-                    showNew = ((x + y) % 4) < (int)(subProgress * 4);
-                    break;
-                case 3: // Spiral
-                    int spiralX = x - PANEL_RES_X/2;
-                    int spiralY = y - PANEL_RES_Y/2;
-                    float angle = atan2f(spiralY, spiralX);
-                    float spiralProgress = (angle + PI) / (TWO_PI);
-                    showNew = spiralProgress < subProgress;
-                    break;
-            }
+            // Map the blend so the noise determines which parts fade first
+            float blend = eased * 1.5f - noise * 0.5f;
+            blend = constrain(blend, 0.0f, 1.0f);
             
-            if (showNew) {
+            uint8_t r1, g1, b1, r2, g2, b2;
+            rgb565_to_888(from[y * PANEL_RES_X + x], r1, g1, b1);
+            rgb565_to_888(to[y * PANEL_RES_X + x], r2, g2, b2);
+            
+            uint8_t r = (uint8_t)(r1 * (1.0f - blend) + r2 * blend);
+            uint8_t g = (uint8_t)(g1 * (1.0f - blend) + g2 * blend);
+            uint8_t b = (uint8_t)(b1 * (1.0f - blend) + b2 * blend);
+            
+            display->drawPixel(x, y, display->color565(r, g, b));
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 31: PIXEL RAIN (Pixels fall, B remains)
+// =============================================================================
+void renderTransitionPixelRain(uint16_t* from, uint16_t* to, float progress) { 
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // Random drop speed and delay per column
+            float dropDelay = hash21(x, 0) * 0.5f;
+            float localProg = constrain((progress - dropDelay) * 2.0f, 0.0f, 1.0f);
+            int dropY = (int)(localProg * PANEL_RES_Y * 1.5f); 
+            
+            // Add a bit of vertical noise so the drops trail nicely
+            if (y < dropY - (hash21(x, y) * 15)) { 
                 display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
             } else {
                 display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
@@ -1738,6 +2108,176 @@ void renderTransitionWipes(uint16_t* from, uint16_t* to, float progress) {
         }
     }
 }
+
+// =============================================================================
+// TRANSITION 32: 4x4 BLOCK WATERFALL (Blocks fall, reveal B)
+// =============================================================================
+void renderTransitionBlockWaterfall(uint16_t* from, uint16_t* to, float progress) { 
+    int blockSize = 4;
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            int blockX = x / blockSize;
+            // Each 4px column falls at slightly different times
+            float dropDelay = hash21(blockX, 0) * 0.5f;
+            float localProg = constrain((progress - dropDelay) * 2.0f, 0.0f, 1.0f);
+            int dropY = (int)(localProg * PANEL_RES_Y);
+            
+            if (y < dropY) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 33: SMOOTH SLIDE RIGHT (A slides out, B slides in)
+// =============================================================================
+void renderTransitionSlideRight(uint16_t* from, uint16_t* to, float progress) {
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            float noise = hash21(x, y);
+            float yFactor = (float)y / PANEL_RES_Y;
+            
+            // Top pixels start falling first
+            float fallThreshold = progress * 1.5f - yFactor * 0.5f;
+            
+            if (fallThreshold > noise) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else if (fallThreshold > noise - 0.1f && progress < 0.95f) {
+                // Highlight edge with a yellowish/tan sand particle color
+                display->drawPixel(x, y, display->color565(220, 180, 100));
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+
+void renderTransitionParticleWind(uint16_t* from, uint16_t* to, float progress) {
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            float noise = hash21(x, y);
+            float windX = progress * PANEL_RES_X * 1.5f;
+            
+            if (x < windX - noise * 20.0f) {
+                // Fully revealed new image
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else if (x < windX) {
+                // Particle displacement zone
+                int srcX = constrain(x + (int)(noise * 20.0f * progress), 0, PANEL_RES_X - 1);
+                int srcY = constrain(y + (int)((hash21(y, x) - 0.5f) * 5.0f * progress), 0, PANEL_RES_Y - 1);
+                display->drawPixel(x, y, from[srcY * PANEL_RES_X + srcX]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// TRANSITION 34: WINDOW BLINDS (Rotating horizontal blinds)
+// =============================================================================
+void renderTransitionWindowBlinds(uint16_t* from, uint16_t* to, float progress) { 
+    int blindHeight = 8;
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            int localY = y % blindHeight;
+            int center = blindHeight / 2;
+            // The blind "opens" from the center of its row
+            float revealThreshold = progress * (blindHeight / 2.0f);
+            
+            if (abs(localY - center) <= revealThreshold) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+
+ void renderTransitionPlasmaEdge(uint16_t* from, uint16_t* to, float progress) {
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // valueNoise was defined in your sketch earlier
+            float n = valueNoise(x * 0.1f, y * 0.1f + progress * 5.0f);
+            float mask = progress * 1.3f - n * 0.3f; // Scale to ensure it finishes
+            
+            if (mask > 1.0f) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else if (mask > 0.85f && progress < 0.95f) {
+                // Glowing cyan/blue plasma edge
+                uint8_t r, g, b;
+                rgb565_to_888(to[y * PANEL_RES_X + x], r, g, b);
+                r = min(255, r + 50);
+                g = min(255, g + 150);
+                b = min(255, b + 255);
+                display->drawPixel(x, y, display->color565(r, g, b));
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}
+            
+void renderTransitionVolcano(uint16_t* from, uint16_t* to, float progress) {
+    float centerX = PANEL_RES_X / 2.0f;
+    float bottomY = PANEL_RES_Y;
+    
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            float dx = x - centerX;
+            float dy = bottomY - y; // distance from bottom
+            float dist = sqrtf(dx*dx + dy*dy);
+            
+            // Explosion radius grows aggressively
+            float radius = progress * PANEL_RES_Y * 1.6f;
+            float noise = valueNoise(dx * 0.1f, dy * 0.1f - progress * 15.0f) * 20.0f;
+            
+            if (dist + noise < radius) {
+                display->drawPixel(x, y, to[y * PANEL_RES_X + x]);
+            } else if (dist + noise < radius + 6.0f && progress > 0.05f) {
+                // Hot magma leading edge
+                display->drawPixel(x, y, display->color565(255, 60, 0));
+            } else {
+                display->drawPixel(x, y, from[y * PANEL_RES_X + x]);
+            }
+        }
+    }
+}          
+
+void renderTransitionSlowOrganic(uint16_t* from, uint16_t* to, float progress) {
+    // Eased time for a very smooth cinematic feel
+    float eased = progress * progress * (3.0f - 2.0f * progress);
+    
+    for (int y = 0; y < PANEL_RES_Y; y++) {
+        for (int x = 0; x < PANEL_RES_X; x++) {
+            // Low frequency noise creates patchy, cloud-like dissolves
+            float noise = valueNoise(x * 0.05f, y * 0.05f);
+            
+            // Map the blend so the noise determines which parts fade first
+            float blend = eased * 1.5f - noise * 0.5f;
+            blend = constrain(blend, 0.0f, 1.0f);
+            
+            uint8_t r1, g1, b1, r2, g2, b2;
+            rgb565_to_888(from[y * PANEL_RES_X + x], r1, g1, b1);
+            rgb565_to_888(to[y * PANEL_RES_X + x], r2, g2, b2);
+            
+            uint8_t r = (uint8_t)(r1 * (1.0f - blend) + r2 * blend);
+            uint8_t g = (uint8_t)(g1 * (1.0f - blend) + g2 * blend);
+            uint8_t b = (uint8_t)(b1 * (1.0f - blend) + b2 * blend);
+            
+            display->drawPixel(x, y, display->color565(r, g, b));
+        }
+    }
+}
+
+
+
+
+
 
 
 
@@ -1769,6 +2309,9 @@ void startTransition() {
 
     // Randomize next transition
     currentTransitionType = (TransitionType)random(0, TRANS_MAX);
+
+
+    if(DEBUG==1) currentTransitionType=(TransitionType) BUG;
     
     // Assign specific duration per transition
     switch (currentTransitionType) {
@@ -1802,8 +2345,19 @@ void startTransition() {
         case TRANS_RAIN:           currentTransitionDuration = 2800; break;
         case TRANS_SHATTER:        currentTransitionDuration = 3000; break;
         case TRANS_WIPES:          currentTransitionDuration = 2500; break;
+        case Blinds:          currentTransitionDuration = 2500; break;
+        case SlideRight:          currentTransitionDuration = 2500; break;
+        case BlockWaterfall:          currentTransitionDuration = 2500; break;
+        case PixelRain:          currentTransitionDuration = 2500; break;
+        case ScrollDown:          currentTransitionDuration = 2500; break;
+        case Wind:             currentTransitionDuration = 2500; break;
+         case PlasmaEdge:             currentTransitionDuration = 2500; break;
+         case Volcano:    currentTransitionDuration = 2500; break;
+         case Organic:    currentTransitionDuration = 2500; break;
         default:                   currentTransitionDuration = 2500; break;
     }
+
+     
 
     Serial.printf("Transition: %d (dur: %lu) - Image: %d -> %d\n", 
                   currentTransitionType, currentTransitionDuration, 
@@ -1865,8 +2419,18 @@ void updateTransition() {
             case TRANS_RAIN:           renderTransitionRain(currentFrame, nextFrame, progress); break;
             case TRANS_SHATTER:        renderTransitionShatter(currentFrame, nextFrame, progress); break;
             case TRANS_WIPES:          renderTransitionWipes(currentFrame, nextFrame, progress); break;
+            case Blinds:               renderTransitionWindowBlinds(currentFrame, nextFrame, progress); break;
+            case SlideRight:           renderTransitionSlideRight(currentFrame, nextFrame, progress); break;  
+            case BlockWaterfall:       renderTransitionBlockWaterfall(currentFrame, nextFrame, progress); break;  
+            case PixelRain:            renderTransitionPixelRain (currentFrame, nextFrame, progress); break; 
+            case ScrollDown:           renderTransitionScrollDown(currentFrame, nextFrame, progress); break;
+            case Wind:                 renderTransitionParticleWind(currentFrame, nextFrame, progress); break;
+            case PlasmaEdge:          renderTransitionPlasmaEdge(currentFrame, nextFrame, progress); break;
+            case Volcano:             renderTransitionVolcano(currentFrame, nextFrame, progress); break;
+            case Organic:             renderTransitionSlowOrganic(currentFrame, nextFrame, progress); break;
             default:                   renderTransitionCrossfade(currentFrame, nextFrame, progress); break;
-        }
+
+        }  
     }
 }
 
@@ -1947,7 +2511,9 @@ void setup() {
             delay(200);
             displayFrame(currentFrame);
             displayFrame(currentFrame);  // double-draw ensures DMA buffer is flushed
-            currentImageIndex = 0;
+            randomSeed(esp_random()); // Seed with ESP32 hardware RNG
+            currentImageIndex = random(0, imageCount);
+            //currentImageIndex = 0;
             Serial.println("First image displayed");
         } else {
             display->fillScreen(display->color565(150, 100, 0));
