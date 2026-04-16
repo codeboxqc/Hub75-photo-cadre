@@ -396,16 +396,95 @@ Add ventilation (matrix panels get warm)
 Consider a clear acrylic cover for protection
 
 Use angled connectors for power and data
+ 
+ # HUB75 Image Converter v2
 
-Portable Setup
-For battery-powered operation:
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)](https://isocpp.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-Use a 5V power bank (20,000mAh+, 2A output minimum)
+A powerful command-line tool to convert any image (JPG, PNG, BMP) to the native .bin format for HUB75 LED matrix displays (64x64 panels).
 
-Consider power bank with pass-through charging
+![Converter Demo](https://via.placeholder.com/800x200?text=HUB75+Image+Converter+Demo)
 
-Add a power switch for the matrix
+## 🎯 What This Tool Does
 
+The HUB75 Image Converter transforms standard image files into the binary format required by the **PixelPulse Matrix** slideshow firmware for ESP32. It handles resizing, color conversion, and gamma correction automatically.
+
+### Key Features
+
+- **3 Color Modes**: 24-bit RGB888 (best), 16-bit RGB565 (good), 8-bit Palette (efficient)
+- **Automatic Resizing**: Scales any image to exactly 64x64 pixels
+- **Gamma Correction**: Proper LED brightness response
+- **Smart Palette Generation**: Median-cut algorithm for optimal 8-bit images
+- **Batch Processing**: Convert entire folders at once
+- **Cross-Platform**: Works on Windows, Linux, and macOS
+
+## 📊 File Size Comparison
+
+| Mode | File Size | Quality | Images per MB | Use Case |
+|------|-----------|---------|---------------|----------|
+| **24-bit** | 12,289 bytes | ★★★★★ | ~85 | Photos, gradients, art |
+| **16-bit** | 8,193 bytes | ★★★★☆ | ~127 | General purpose (recommended) |
+| **8-bit** | 4,865 bytes | ★★★☆☆ | ~215 | Pixel art, logos, limited palette |
+
+## 🔧 Installation
+
+### Windows (Pre-built)
+1. Download the latest `imageTOhub75.exe` from [Releases](https://github.com/yourusername/hub75-image-converter/releases)
+2. Place it in your working directory
+
+### Build from Source (All Platforms)
+
+**Prerequisites:**
+- C++17 compiler (GCC 7+, Clang 5+, MSVC 2019+)
+- CMake 3.10+ (optional)
+
+**Using CMake:**
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/hub75-image-converter.git
+cd hub75-image-converter
+
+# Create build directory
+mkdir build && cd build
+
+# Configure and build
+cmake ..
+cmake --build . --config Release
 Use right-angle jumper wires to save space
 
+
+
+imageTOhub75.exe <input_folder> <output_folder> <mode>
+imageTOhub75.exe  my_images  converted 24
+
+24-bit RGB888 (Mode 24)
+Structure: [mode_byte] + [R,G,B] × 4096 pixels
+
+Total Size: 12,289 bytes
+
+Best for: Photos, gradients, artwork with fine color detail
+
+Quality: Perfect color reproduction
+
+16-bit RGB565 (Mode 16)
+Structure: [mode_byte] + [RGB565_le] × 4096 pixels
+
+Total Size: 8,193 bytes (33% smaller than 24-bit)
+
+Best for: General purpose, most use cases
+
+Quality: Excellent, barely noticeable difference on LEDs
+
+8-bit Palette (Mode 8)
+Structure: [mode_byte] + [768-byte palette] + [4096 indices]
+
+Total Size: 4,865 bytes (60% smaller than 24-bit)
+
+Best for: Pixel art, logos, limited color images
+
+Quality: Good for images with ≤256 colors
+
+save all bin to your SD card
 
